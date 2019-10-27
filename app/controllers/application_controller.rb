@@ -56,44 +56,76 @@ class ApplicationController < ActionController::Base
   end
 
   def crystal_uri
-    expand_url ENV["CRYSTAL_URL"]
+    svc = discover_service_instance('ecsdemo-crystal')
+    svc ? URI::HTTP.build(host: svc["AWS_INSTANCE_IPV4"], path: "/crystal", port: 3000) : []
   end
 
   def nodejs_uri
-    expand_url ENV["NODEJS_URL"]
+    svc = discover_service_instance('ecsdemo-nodejs')
+    svc ? URI::HTTP.build(host: svc["AWS_INSTANCE_IPV4"], path: "/", port: 3000) : []
   end
 
-  # Resolve the SRV records for the hostname in the URL
-  def expand_url(url)
-    uri = URI(url)
-    resolver = Resolv::DNS.new()
-
-    # if host is relative, append the service discovery name
-    host = uri.host.count('.') > 0 ? uri.host : "#{uri.host}.#{ENV["_SERVICE_DISCOVERY_NAME"]}"
-
-    # lookup the SRV record and use if found
-    begin
-      srv = resolver.getresource(host, Resolv::DNS::Resource::IN::SRV)
-      uri.host = srv.target.to_s
-      uri.port = srv.port.to_s
-      logger.info "uri port is #{uri.port}"
-      if uri.port == 0
-        uri.port = 80
-        logger.info "uri port is now #{uri.port}"
-      end
-    rescue => e
-      logger.error e.message
-      logger.error e.backtrace.join("\n")
-    end
-
-    logger.info "expanded #{url} to #{uri}"
-    uri
-  end
-
-  before_action :discover_availability_zone
+  before_action :discover_availability_zone, :discover_namespace
   before_action :code_hash
 
+  private
+  ###
+  # Looks up service dependencies using cloud map.
+  # Supports two types of execution modes
+  # Params
+  #
+  # service_name => The name of the desired service e.g. ecsdemo-nodejs or ecsdemo-crystal
+  #
+  # mode => [:soft, :hard]
+  # :soft =>
+  #   In the case that a dependency is not found in the callee availability zone, will do an additional lookup to
+  #   discover a running instance in any other availability zone.
+  # :hard =>
+  #   In the case that a dependency is not found in the callee availability zone, will fail the entire request and
+  #   return a blank instance
+  #
+  def discover_service_instance(service_name, mode=:soft)
+    service_discovery_client = Aws::ServiceDiscovery::Client.new
+    found_instance = []
+
+    logger.info "sd lookup: trying to find service #{service_name} at availability zone #{@availability_zone} and namespace #{@namespace}"
+    response = service_discovery_client.discover_instances(
+      namespace_name: @namespace,
+      service_name: service_name,
+      query_parameters: {
+        "AVAILABILITY_ZONE": @availability_zone,
+      }
+    )
+
+    if response.instances
+      found_instance = response.instances.sample if response.instances
+    end
+
+    if response.instances.empty? && mode == :soft
+      logger.info "soft mode: trying all the availability zones"
+      response = service_discovery_client.discover_instances(
+          namespace_name: @namespace,
+          service_name: service_name,
+          )
+
+      found_instance = response.instances.sample if response.instances
+    end
+
+    found_instance ? found_instance["attributes"] : []
+  end
+
+  def discover_namespace
+    @namespace = ENV.fetch('CLOUD_MAP_NAMESPACE')
+  end
+
+  def discover_region
+    @region = ENV['AWS_REGION']
+  end
+
   def discover_availability_zone
+    # Used to query cloud map with.
+    @availability_zone = ENV['FULL_AZ']
+    # Shorter version to be displayed on the UI
     @az = ENV["AZ"]
   end
 

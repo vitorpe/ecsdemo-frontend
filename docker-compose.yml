@@ -4,7 +4,8 @@ services:
     environment:
       - CRYSTAL_URL=http://ecsdemo-crystal.service:3000/crystal
       - NODEJS_URL=http://ecsdemo-nodejs.service:3000
-    image: brentley/ecsdemo-frontend
+      - CLOUD_MAP_NAMESPACE=devcluster.local
+    image: vitorpe/ecsdemo-frontend:c19101f57cdab9bd96036d8f55f3ae97e406142c
     ports:
       - "3000:3000"
     logging:

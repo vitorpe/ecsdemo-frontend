@@ -77,7 +77,12 @@ if [[ ${zone} == "unknown" ]]; then
   zone=$(curl -m2 -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r '.availabilityZone' | grep -o .$)
 fi
 
+full_avaliability_zone=$(curl -m2 -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r '.availabilityZone')
+region=$(curl -m2 -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r '.region')
+
 export CODE_HASH="$(cat code_hash.txt)"
+export FULL_AZ=$full_avaliability_zone
+export AWS_REGION=$region
 export AZ="${IP} in AZ-${zone}"
 
 # exec bundle exec thin start
